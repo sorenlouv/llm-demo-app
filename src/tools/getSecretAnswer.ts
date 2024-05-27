@@ -13,7 +13,7 @@ export const getSecretAnswerSchema: ChatCompletionTool = {
 export async function getSecretAnswer() {
   const ms = random(500, 5000);
   await sleep(ms);
-  return `The secret answer is ${ms}`;
+  return ms;
 }
 
 function sleep(ms: number) {

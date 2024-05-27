@@ -38,6 +38,10 @@ const addressMockData = [
 ];
 
 export async function getAddress({ name }: { name: string }) {
+  if (name.toLowerCase().includes("peter")) {
+    throw new Error("Peter is not a valid name!!");
+  }
+
   const address = addressMockData.find((person) =>
     person.name.includes(name)
   )?.address;

@@ -1,54 +1,86 @@
-import { Request, Response } from "express";
 import { OpenAI } from "openai";
 import { availableTools, toolSchemas } from "./tools/functions";
 import { ChatCompletionMessageParam } from "openai/resources";
 import "dotenv/config";
 import { logger } from "./logger";
+import apm from "elastic-apm-node";
+import { withSpan } from "./helper/withSpan";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export async function chat(req: Request, res: Response) {
-  try {
-    const { prompt } = req.body;
-    const systemPrompt = "You are a helpful AI assistant.";
-    const messages: ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: prompt },
-    ];
+const openAiModel = "gpt-3.5-turbo-16k-0613";
 
-    const initialResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo-16k-0613",
-      messages,
-      tools: toolSchemas,
-      tool_choice: "auto",
-    });
+export async function chat(prompt: string) {
+  const systemPrompt = "You are a helpful AI assistant.";
+  const messages: ChatCompletionMessageParam[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: prompt },
+  ];
 
-    const responseMessage = initialResponse.choices[0].message;
+  let totalTokens = 0;
 
-    logger.debug("initialResponse", initialResponse);
+  const initialResponse = await withSpan(
+    {
+      name: "initial user prompt",
+      subType: "chat",
+      labels: {
+        prompt,
+        system_prompt: systemPrompt,
+      },
+    },
+    () =>
+      openai.chat.completions.create({
+        model: openAiModel,
+        messages,
+        tools: toolSchemas,
+        tool_choice: "auto",
+      })
+  );
 
-    messages.push(responseMessage);
+  totalTokens += initialResponse.usage?.total_tokens ?? 0;
 
-    const toolCalls = responseMessage.tool_calls;
-    if (toolCalls) {
-      const toolResponses = await getToolResponses(toolCalls);
-      logger.debug("toolResponses", toolResponses);
-      const secondResponse = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo-16k-0613",
-        messages: [...messages, ...toolResponses],
-      });
-      logger.debug("secondResponse.choices", secondResponse.choices);
-      return res.json(secondResponse.choices[0].message);
-    }
+  const initialResponseMessage = initialResponse.choices[0].message;
+  messages.push(initialResponseMessage);
 
-    return res.json(initialResponse.choices[0].message);
-  } catch (error) {
-    logger.error("chat error", error);
+  const toolCalls = initialResponseMessage.tool_calls;
+  if (toolCalls) {
+    const toolResponses = await getToolResponses(toolCalls);
+    logger.debug("toolResponses", toolResponses);
 
-    res.status(500).json({ error: "Something went wrong" });
+    messages.push(...toolResponses);
+
+    const secondResponse = await withSpan(
+      {
+        name: "prompt with tool responses",
+        subType: "chat",
+        labels: {
+          tool_calls: JSON.stringify(toolCalls),
+          tool_responses: JSON.stringify(toolResponses),
+        },
+      },
+      () =>
+        openai.chat.completions.create({
+          model: openAiModel,
+          messages,
+        })
+    );
+
+    totalTokens += secondResponse.usage?.total_tokens ?? 0;
+
+    logger.debug("secondResponse.choices", secondResponse.choices);
+    const secondResponseMessage = secondResponse.choices[0].message;
+    messages.push(secondResponseMessage);
   }
+
+  const tx = apm.currentTransaction;
+
+  // @ts-expect-error
+  tx?.setMessageContext({ body: JSON.stringify(messages) });
+  tx?.setLabel("total_token_count", totalTokens, false);
+
+  return messages;
 }
 
 async function getToolResponses(
@@ -62,23 +94,36 @@ async function getToolResponses(
       typeof functionToCall
     >;
     logger.debug(`toolCall`, toolCall);
-    logger.debug(`functionToCall ${functionToCall.name}`);
     logger.debug(`functionArgs`, functionArgs);
 
-    // @ts-expect-error
-    const functionResponse = (await functionToCall(functionArgs)) as Awaited<
-      ReturnType<typeof functionToCall>
-    >;
+    const toolResponse = await withSpan(
+      {
+        name: functionName.toString(),
+        subType: "tool",
+        labels: {
+          function_name: functionName,
+          function_args: JSON.stringify(functionArgs),
+        },
+      },
+      async (span) => {
+        // @ts-expect-error
+        const res = await functionToCall(functionArgs);
 
-    logger.debug(
-      `functionResponse ${JSON.stringify(functionResponse, null, 2)}`
+        span?.addLabels({
+          tool_response: JSON.stringify(res),
+        });
+
+        return res;
+      }
     );
+
+    logger.debug(`toolResponse ${JSON.stringify(toolResponse, null, 2)}`);
 
     return {
       tool_call_id: toolCall.id,
       role: "tool",
       name: functionName,
-      content: JSON.stringify(functionResponse, null, 2),
+      content: JSON.stringify(toolResponse, null, 2),
     } as ChatCompletionMessageParam;
   });
 
