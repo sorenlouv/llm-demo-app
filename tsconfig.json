@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", // Target ECMAScript version
+    "module": "CommonJS", // Module system
+    "outDir": "./dist", // Output directory
+    "rootDir": "./src", // Root directory for source files
+    "strict": true, // Enable strict type checking
+    "moduleResolution": "node", // Module resolution strategy
+    "esModuleInterop": true, // Enable interoperability with CommonJS modules
+    "skipLibCheck": true, // Skip type checking of declaration files
+    "forceConsistentCasingInFileNames": true // Ensure consistent casing in imports
+  },
+  "include": ["src/**/*"], // Include all files in the `src` directory
+  "exclude": ["node_modules"] // Exclude the `node_modules` directory
+}
