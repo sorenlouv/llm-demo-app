@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { OpenAI } from "openai";
-import { availableTools, toolSchemas } from "./functions";
+import { availableTools, toolSchemas } from "./tools/functions";
 import { ChatCompletionMessageParam } from "openai/resources";
 import "dotenv/config";
 import { logger } from "./logger";
@@ -40,10 +40,10 @@ export async function chat(req: Request, res: Response) {
         messages: [...messages, ...toolResponses],
       });
       logger.debug("secondResponse.choices", secondResponse.choices);
-      return res.json(secondResponse.choices);
+      return res.json(secondResponse.choices[0].message);
     }
 
-    return res.json(initialResponse.choices);
+    return res.json(initialResponse.choices[0].message);
   } catch (error) {
     logger.error("chat error", error);
 
@@ -61,22 +61,24 @@ async function getToolResponses(
     const functionArgs = JSON.parse(toolCall.function.arguments) as Parameters<
       typeof functionToCall
     >;
-    logger.debug("toolCall", toolCall);
-    logger.debug(`functionToCall`, functionToCall.name);
-    logger.debug("functionArgs", functionArgs);
+    logger.debug(`toolCall`, toolCall);
+    logger.debug(`functionToCall ${functionToCall.name}`);
+    logger.debug(`functionArgs`, functionArgs);
 
     // @ts-expect-error
     const functionResponse = (await functionToCall(functionArgs)) as Awaited<
       ReturnType<typeof functionToCall>
     >;
 
-    logger.debug("functionResponse", functionResponse);
+    logger.debug(
+      `functionResponse ${JSON.stringify(functionResponse, null, 2)}`
+    );
 
     return {
       tool_call_id: toolCall.id,
       role: "tool",
       name: functionName,
-      content: JSON.stringify(functionResponse),
+      content: JSON.stringify(functionResponse, null, 2),
     } as ChatCompletionMessageParam;
   });
 

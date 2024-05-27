@@ -1,8 +1,10 @@
+import { isEmpty, omit } from "lodash";
 import { format, createLogger, transports } from "winston";
 const { timestamp, combine, printf, errors, json } = format;
 
 const logFormat = printf(({ level, message, timestamp, stack, ...meta }) => {
-  return `${timestamp} ${level}: ${stack || message} ${meta ? JSON.stringify(meta, null, 2) : ""}`;
+  const metaWithoutServiceName = omit(meta, "service");
+  return `${timestamp} ${level}: ${stack || message} ${isEmpty(metaWithoutServiceName) ? "" : JSON.stringify(metaWithoutServiceName, null, 2)}`;
 });
 
 const structuredLogFormat = true;
