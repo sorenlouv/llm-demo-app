@@ -4,7 +4,7 @@ import {
 } from "openai/resources";
 import { availableTools } from "./functions";
 import { logger } from "../logger";
-import { withLLMToolSpan } from "../helper/withSpan";
+import { withFunctionCallingSpan } from "../helper/withSpan";
 
 export async function getToolResponses(
   toolCalls: ChatCompletionMessageToolCall[]
@@ -13,30 +13,13 @@ export async function getToolResponses(
     const functionName = toolCall.function.name as keyof typeof availableTools;
     const functionToCall = availableTools[functionName];
 
-    const functionArgs = JSON.parse(toolCall.function.arguments) as Parameters<
-      typeof functionToCall
-    >;
+    const functionArgs = JSON.parse(toolCall.function.arguments) as any;
     logger.debug(`toolCall`, toolCall);
     logger.debug(`functionArgs`, functionArgs);
 
-    const toolResponse = await withLLMToolSpan(
-      {
-        name: functionName.toString(),
-        labels: {
-          function_name: functionName,
-          function_args: JSON.stringify(functionArgs),
-        },
-      },
-      async (span) => {
-        // @ts-expect-error
-        const res = await functionToCall(functionArgs);
-
-        span?.addLabels({
-          tool_response: JSON.stringify(res),
-        });
-
-        return res;
-      }
+    const toolResponse = await withFunctionCallingSpan(
+      { functionName: functionName.toString(), functionArgs },
+      async () => functionToCall(functionArgs)
     );
 
     logger.debug(`toolResponse ${JSON.stringify(toolResponse, null, 2)}`);

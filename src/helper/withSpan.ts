@@ -1,20 +1,22 @@
-import { Request, Response } from "express";
 import apm from "elastic-apm-node";
 import { logger } from "../logger";
+import { ChatCompletion } from "openai/resources";
 
-async function withLLMSpan<T>(
+async function withSpan<T>(
   {
     name,
+    type,
     subType,
     labels = {},
   }: {
     name: string;
+    type: string;
     subType: string | null;
     labels: Record<string, string | number>;
   },
   operation: (span: apm.Span | null) => Promise<T>
 ): Promise<T> {
-  const span = apm.startSpan(name, "llm", subType);
+  const span = apm.startSpan(name, type, subType);
 
   if (labels) {
     span?.addLabels(labels);
@@ -39,28 +41,68 @@ async function withLLMSpan<T>(
   }
 }
 
-export async function withLLMChatSpan<T>(
+export async function withChatCompletionSpan(
   {
     name,
-    labels,
+    prompt,
+    systemPrompt,
   }: {
     name: string;
-    labels: Record<string, string | number>;
+    prompt?: string;
+    systemPrompt?: string;
   },
-  operation: (span: apm.Span | null) => Promise<T>
-): Promise<T> {
-  return withLLMSpan({ name, subType: "chat", labels }, operation);
+  operation: (span: apm.Span | null) => Promise<ChatCompletion>
+): Promise<ChatCompletion> {
+  return withSpan(
+    {
+      name,
+      type: "llm",
+      subType: "chat",
+      labels: {
+        ...(prompt ? { prompt } : {}),
+        ...(systemPrompt ? { system_prompt: systemPrompt } : {}),
+      },
+    },
+    async (span) => {
+      const res = await operation(span);
+
+      const message = res?.choices?.[0]?.message?.content ?? "";
+      const totalTokenCount = res?.usage?.total_tokens ?? 0;
+
+      span?.addLabels({
+        response: message,
+        total_token_count: totalTokenCount,
+      });
+
+      return res;
+    }
+  );
 }
 
-export async function withLLMToolSpan<T>(
+export async function withFunctionCallingSpan<T>(
   {
-    name,
-    labels,
+    functionName,
+    functionArgs,
   }: {
-    name: string;
-    labels: Record<string, string | number>;
+    functionName: string;
+    functionArgs: unknown;
   },
   operation: (span: apm.Span | null) => Promise<T>
 ): Promise<T> {
-  return withLLMSpan({ name, subType: "tool", labels }, operation);
+  return withSpan(
+    {
+      name: functionName,
+      type: "llm",
+      subType: "tool",
+      labels: {
+        function_name: functionName,
+        function_args: JSON.stringify(functionArgs),
+      },
+    },
+    async (span) => {
+      const res = await operation(span);
+      span?.addLabels({ response: JSON.stringify(res) });
+      return res;
+    }
+  );
 }

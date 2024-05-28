@@ -1,10 +1,10 @@
 import { OpenAI } from "openai";
-import { availableTools, toolSchemas } from "./tools/functions";
+import { toolSchemas } from "./tools/functions";
 import { ChatCompletionMessageParam } from "openai/resources";
 import "dotenv/config";
 import { logger } from "./logger";
 import apm from "elastic-apm-node";
-import { withLLMChatSpan, withLLMToolSpan } from "./helper/withSpan";
+import { withChatCompletionSpan } from "./helper/withSpan";
 import { getToolResponses } from "./tools/getToolResponses";
 
 const openai = new OpenAI({
@@ -22,21 +22,20 @@ export async function chat(prompt: string) {
 
   let totalTokens = 0;
 
-  const initialResponse = await withLLMChatSpan(
+  const initialResponse = await withChatCompletionSpan(
     {
       name: "User prompt",
-      labels: {
-        prompt,
-        system_prompt: systemPrompt,
-      },
+      prompt,
+      systemPrompt,
     },
-    () =>
-      openai.chat.completions.create({
+    async () => {
+      return openai.chat.completions.create({
         model: openAiModel,
         messages,
         tools: toolSchemas,
         tool_choice: "auto",
-      })
+      });
+    }
   );
 
   totalTokens += initialResponse.usage?.total_tokens ?? 0;
@@ -51,13 +50,9 @@ export async function chat(prompt: string) {
 
     messages.push(...toolResponses);
 
-    const secondResponse = await withLLMChatSpan(
+    const secondResponse = await withChatCompletionSpan(
       {
         name: "Prompt with tool responses",
-        labels: {
-          tool_calls: JSON.stringify(toolCalls),
-          tool_responses: JSON.stringify(toolResponses),
-        },
       },
       () =>
         openai.chat.completions.create({

@@ -1,5 +1,4 @@
 import { ChatCompletionTool } from "openai/resources";
-import axios from "axios";
 import { random } from "lodash";
 
 export const getSecretAnswerSchema: ChatCompletionTool = {
