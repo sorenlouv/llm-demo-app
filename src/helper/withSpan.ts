@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import apm from "elastic-apm-node";
 import { logger } from "../logger";
 
-export async function withSpan<T>(
+async function withLLMSpan<T>(
   {
     name,
     subType,
@@ -21,8 +21,11 @@ export async function withSpan<T>(
   }
 
   try {
-    return await operation(span);
+    const res = await operation(span);
+    span?.setOutcome("success");
+    return res;
   } catch (e) {
+    span?.setOutcome("failure");
     const error = e as Error;
 
     logger.error(
@@ -34,4 +37,30 @@ export async function withSpan<T>(
   } finally {
     span?.end();
   }
+}
+
+export async function withLLMChatSpan<T>(
+  {
+    name,
+    labels,
+  }: {
+    name: string;
+    labels: Record<string, string | number>;
+  },
+  operation: (span: apm.Span | null) => Promise<T>
+): Promise<T> {
+  return withLLMSpan({ name, subType: "chat", labels }, operation);
+}
+
+export async function withLLMToolSpan<T>(
+  {
+    name,
+    labels,
+  }: {
+    name: string;
+    labels: Record<string, string | number>;
+  },
+  operation: (span: apm.Span | null) => Promise<T>
+): Promise<T> {
+  return withLLMSpan({ name, subType: "tool", labels }, operation);
 }
