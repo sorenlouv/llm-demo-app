@@ -3,8 +3,6 @@ import { toolSchemas } from "./tools/functions";
 import { ChatCompletionMessageParam } from "openai/resources";
 import "dotenv/config";
 import { logger } from "./logger";
-import apm from "elastic-apm-node";
-import { withChatCompletionSpan } from "./helper/withSpan";
 import { getToolResponses } from "./tools/getToolResponses";
 
 const openai = new OpenAI({
@@ -20,25 +18,12 @@ export async function chat(prompt: string) {
     { role: "user", content: prompt },
   ];
 
-  let totalTokens = 0;
-
-  const initialResponse = await withChatCompletionSpan(
-    {
-      name: "User prompt",
-      prompt,
-      systemPrompt,
-    },
-    async () => {
-      return openai.chat.completions.create({
-        model: openAiModel,
-        messages,
-        tools: toolSchemas,
-        tool_choice: "auto",
-      });
-    }
-  );
-
-  totalTokens += initialResponse.usage?.total_tokens ?? 0;
+  const initialResponse = await openai.chat.completions.create({
+    model: openAiModel,
+    messages,
+    tools: toolSchemas,
+    tool_choice: "auto",
+  });
 
   const initialResponseMessage = initialResponse.choices[0].message;
   messages.push(initialResponseMessage);
@@ -50,29 +35,15 @@ export async function chat(prompt: string) {
 
     messages.push(...toolResponses);
 
-    const secondResponse = await withChatCompletionSpan(
-      {
-        name: "Prompt with tool responses",
-      },
-      () =>
-        openai.chat.completions.create({
-          model: openAiModel,
-          messages,
-        })
-    );
-
-    totalTokens += secondResponse.usage?.total_tokens ?? 0;
+    const secondResponse = await openai.chat.completions.create({
+      model: openAiModel,
+      messages,
+    });
 
     logger.debug("secondResponse.choices", secondResponse.choices);
     const secondResponseMessage = secondResponse.choices[0].message;
     messages.push(secondResponseMessage);
   }
-
-  const tx = apm.currentTransaction;
-
-  // @ts-expect-error
-  tx?.setMessageContext({ body: JSON.stringify(messages) });
-  tx?.setLabel("total_token_count", totalTokens, false);
 
   return messages;
 }

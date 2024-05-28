@@ -4,7 +4,6 @@ import {
 } from "openai/resources";
 import { availableTools } from "./functions";
 import { logger } from "../logger";
-import { withFunctionCallingSpan } from "../helper/withSpan";
 
 export async function getToolResponses(
   toolCalls: ChatCompletionMessageToolCall[]
@@ -17,10 +16,7 @@ export async function getToolResponses(
     logger.debug(`toolCall`, toolCall);
     logger.debug(`functionArgs`, functionArgs);
 
-    const toolResponse = await withFunctionCallingSpan(
-      { functionName: functionName.toString(), functionArgs },
-      async () => functionToCall(functionArgs)
-    );
+    const toolResponse = await functionToCall(functionArgs);
 
     logger.debug(`toolResponse ${JSON.stringify(toolResponse, null, 2)}`);
 
