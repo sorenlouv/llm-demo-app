@@ -17,7 +17,8 @@ export function startServer() {
       }
       res.end();
     } catch (e) {
-      res.status(500).json({ error: "Something went wrong" });
+      logger.error(e);
+      res.status(500).json({ error: "Something went wrong", e });
     }
   });
 
